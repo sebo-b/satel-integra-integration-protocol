@@ -10,6 +10,10 @@ This is a _Node.js_ module which can be used to implement a service or an applic
 
 The module implements decoding of byte frames to the protocol messages and encoding of the protocol messages to byte frames accordingly to the [Satel Integra integration protocol specification](https://www.satel.pl/en/download/instrukcje/ethm1_plus_op_int_2020-03-05_4f512412.pdf). The module **does not** implement any kind of communication channel with the Satel Integra system.
 
+## Example usage over with ETHM-1 over TCP/IP 
+
+You can find example usage of this module in [example_usage.js](example_usage.js)
+
 ## Status
 
 The module doesn't support the full set of protocol messages yet.

@@ -397,25 +397,83 @@ function encodeZonesIsolateCommand(prefixAndUserCode, zones) {
   );
 }
 
-class FlagArrayAnswer {
+const DeviceType = Object.freeze({
+  Partition: 0,
+  Zone: 1,
+  User: 2,
+  Expander: 3,
+  Output: 4,
+  ZoneWithPartition: 5,
+  Timer: 6,
+  Telephone: 7,
+  Object: 15,
+  Partition: 16,
+  Output: 17,
+  PartitionWithOptions: 18,
+  PartitionWithOptionsAndDependent: 19,
+});
+
+function encodeReadDeviceName(deviceType, deviceNo) {  
+  
+  const devNoRanges = {
+    [DeviceType.Partition]: [1,32],
+    [DeviceType.Zone]: [1,256],
+    [DeviceType.User]: [1,255],
+    [DeviceType.Expander]: [129,210],
+    [DeviceType.Output]: [1,256],
+    [DeviceType.ZoneWithPartition]: [1,32],
+    [DeviceType.Timer]: [1,64],
+    [DeviceType.Telephone]: [1,16],
+    [DeviceType.Object]: [1,8],
+    [DeviceType.Partition]: [1,32],
+    [DeviceType.Output]: [1,256],
+    [DeviceType.PartitionWithOptions]: [1,32],
+    [DeviceType.PartitionWithOptionsAndDependent]: [1,32]
+  };
+
+  if (!devNoRanges[deviceType])
+    throw new Error("Unknown deviceType");
+  
+  if (deviceNo < devNoRanges[deviceType][0] || deviceNo > devNoRanges[deviceType][1])
+    throw new Error(`deviceNo ${deviceNo} out of range (${devNoRanges[deviceType][0]}-${devNoRanges[deviceType][1]}), for the given type ${deviceType}`);
+
+  // send 0 instead of 256 in INTEGRA 256 Plus
+  if (deviceNo === 256)
+    deviceNo = 0;
+      
+  return message_impl.encodeNoDataCommand(
+    Buffer.from([message_impl.Commands.ReadDeviceName, deviceType, deviceNo]));
+}
+
+class AnswerBase {
+  
+  #allowedLengths;
+
   constructor(allowedLengths) {
-    this._allowedLengths = allowedLengths;
-    this._flags = [];
+    this.#allowedLengths = new Set(allowedLengths);
   }
 
   decode(frame) {
-    if (
-      this._allowedLengths.every(function (allowedLength) {
-        return allowedLength != frame.length;
-      })
-    ) {
+    return this.#allowedLengths.has(frame.length);
+  }
+
+};
+
+class FlagArrayAnswer extends AnswerBase {
+  
+  constructor(allowedLengths) {
+    super(allowedLengths);
+  }
+
+  decode(frame) {
+
+    if (!super.decode(frame))
       return false;
-    }
 
     this._flags = new Array();
-    for (const byte of frame) {
-      for (let i = 0; i < 8; ++i) {
-        this._flags.push((byte & (1 << i)) != 0);
+    for (let byte of frame) {
+      for (let i = 0; i < 8; ++i, byte >>= 1) {
+        this._flags.push( (byte & 1) != 0);
       }
     }
 
@@ -703,6 +761,103 @@ class NewDataAnswer extends FlagArrayAnswer {
   }
 }
 
+class ReadDeviceNameAnswer extends AnswerBase {
+
+  type;
+  number;
+  function;
+  name;
+
+  partitionNumber = null;
+  serialNumber = null;
+  objectNumber = null;
+  paritionOptions1 = null;
+  paritionOptions2 = null;
+  outputDurationTime = null;
+  autoArmDefer = null;
+  autoArmDeferTime = null;
+  timers = null;
+
+  constructor() {
+    super([19,20, 21, 24, 28]);
+  }
+
+  decode(frame) {
+
+    // bun.js doesn't support cp1250, node does
+    // we could import iconv, but it will create another dependency just for 256 bytes of mapping
+    const cp1250map = 
+        "\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}"+
+        "\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}\u{FFFD}"+
+        "\u{0020}\u{0021}\u{0022}\u{0023}\u{0024}\u{0025}\u{0026}\u{0027}\u{0028}\u{0029}\u{002A}\u{002B}\u{002C}\u{002D}\u{002E}\u{002F}"+
+        "\u{0030}\u{0031}\u{0032}\u{0033}\u{0034}\u{0035}\u{0036}\u{0037}\u{0038}\u{0039}\u{003A}\u{003B}\u{003C}\u{003D}\u{003E}\u{003F}"+
+        "\u{0040}\u{0041}\u{0042}\u{0043}\u{0044}\u{0045}\u{0046}\u{0047}\u{0048}\u{0049}\u{004A}\u{004B}\u{004C}\u{004D}\u{004E}\u{004F}"+
+        "\u{0050}\u{0051}\u{0052}\u{0053}\u{0054}\u{0055}\u{0056}\u{0057}\u{0058}\u{0059}\u{005A}\u{005B}\u{005C}\u{005D}\u{005E}\u{005F}"+
+        "\u{0060}\u{0061}\u{0062}\u{0063}\u{0064}\u{0065}\u{0066}\u{0067}\u{0068}\u{0069}\u{006A}\u{006B}\u{006C}\u{006D}\u{006E}\u{006F}"+
+        "\u{0070}\u{0071}\u{0072}\u{0073}\u{0074}\u{0075}\u{0076}\u{0077}\u{0078}\u{0079}\u{007A}\u{007B}\u{007C}\u{007D}\u{007E}\u{007F}"+
+        "\u{20AC}\u{FFFD}\u{201A}\u{FFFD}\u{201E}\u{2026}\u{2020}\u{2021}\u{FFFD}\u{2030}\u{0160}\u{2039}\u{015A}\u{0164}\u{017D}\u{0179}"+
+        "\u{FFFD}\u{2018}\u{2019}\u{201C}\u{201D}\u{2022}\u{2013}\u{2014}\u{FFFD}\u{2122}\u{0161}\u{203A}\u{015B}\u{0165}\u{017E}\u{017A}"+
+        "\u{00A0}\u{02C7}\u{02D8}\u{0141}\u{00A4}\u{0104}\u{00A6}\u{00A7}\u{00A8}\u{00A9}\u{015E}\u{00AB}\u{00AC}\u{00AD}\u{00AE}\u{017B}"+
+        "\u{00B0}\u{00B1}\u{02DB}\u{0142}\u{00B4}\u{00B5}\u{00B6}\u{00B7}\u{00B8}\u{0105}\u{015F}\u{00BB}\u{013D}\u{02DD}\u{013E}\u{017C}"+
+        "\u{0154}\u{00C1}\u{00C2}\u{0102}\u{00C4}\u{0139}\u{0106}\u{00C7}\u{010C}\u{00C9}\u{0118}\u{00CB}\u{011A}\u{00CD}\u{00CE}\u{010E}"+
+        "\u{0110}\u{0143}\u{0147}\u{00D3}\u{00D4}\u{0150}\u{00D6}\u{00D7}\u{0158}\u{016E}\u{00DA}\u{0170}\u{00DC}\u{00DD}\u{0162}\u{00DF}"+
+        "\u{0155}\u{00E1}\u{00E2}\u{0103}\u{00E4}\u{013A}\u{0107}\u{00E7}\u{010D}\u{00E9}\u{0119}\u{00EB}\u{011B}\u{00ED}\u{00EE}\u{010F}"+
+        "\u{0111}\u{0144}\u{0148}\u{00F3}\u{00F4}\u{0151}\u{00F6}\u{00F7}\u{0159}\u{016F}\u{00FA}\u{0171}\u{00FC}\u{00FD}\u{0163}\u{02D9}"
+
+    if (!super.decode(frame))
+      return false;
+
+    this.type = frame.readUInt8(0);
+    this.number = frame.readUInt8(1);
+    this.function = frame.readUInt8(2);
+    
+    let n = "";
+    for (let i = 3; i < 19; ++i)
+      n += cp1250map[frame.readUInt8(i)];
+    this.name = n.trimEnd();
+
+    switch (this.type) {
+      case DeviceType.User: 
+        this.serialNumber = frame.readUInt8(19); 
+        break;
+
+      case DeviceType.ZoneWithPartition: 
+        this.partitionNumber = frame.readUInt8(19); 
+        break;
+      
+      case DeviceType.Output: 
+        this.outputDurationTime = frame.readUInt16BE(19) * 0.1;
+        break;
+
+      case DeviceType.PartitionWithOptionsAndDependent: 
+        this.timers = [...frame.subarray(24,28)];
+        // no break, PASS THROUGH
+
+      case DeviceType.PartitionWithOptions:
+        this.paritionOptions1 = frame.readUInt8(20);
+        this.paritionOptions2 = frame.readUInt8(21);
+        this.autoArmDeferTime = frame.readUInt16BE(22);
+        
+        switch (this.autoArmDeferTime >> 14) {
+          case 0: this.autoArmDefer = 'inactive'; break;
+          case 1: this.autoArmDefer = 'set'; break;
+          case 2: this.autoArmDefer = 'running'; break;
+          default: this.autoArmDefer = 'unknown';
+        }
+        this.autoArmDeferTime &= 0x3F;
+        // no break, PASS THROUGH
+
+      case DeviceType.Partition:
+        this.objectNumber = frame.readUInt8(19); 
+        break;
+
+    }
+
+    Object.freeze(this);
+    return true;
+  }
+}
+
 class CommandResultAnswer {
   decode(frame) {
     if (frame.length != 1) {
@@ -778,22 +933,23 @@ CommandResultAnswer.ResultCodes = Object.freeze({
 });
 
 function decodeMessage(frame) {
-  const decoder = new Decoder();
-  let decoded = false;
-  for (const b of frame.values()) {
-    if (decoder.addByte(b)) {
-      decoded = true;
-      break;
+
+  let decodedFrame;
+
+  if (frame instanceof Decoder) {
+    decodedFrame = frame.frame();
+  }
+  else {
+    const decoder = new Decoder();
+    for (const b of frame.values()) {
+      if (decoder.addByte(b)) {
+        decodedFrame = decoder.frame();
+        break;
+      }
     }
   }
 
-  if (!decoded) {
-    return null;
-  }
-
-  const decodedFrame = decoder.frame();
-
-  if (decodedFrame.length < 3) {
+  if (!decodedFrame || decodedFrame.length < 3) {
     return null;
   }
 
@@ -897,6 +1053,9 @@ function decodeMessage(frame) {
     case message_impl.Commands.ZonesMaskedMemory:
       message = new ZonesMaskedMemoryAnswer();
       break;
+    case message_impl.Commands.ReadDeviceName:
+      message = new ReadDeviceNameAnswer();
+      break;
     default:
       return null;
   }
@@ -909,6 +1068,7 @@ function decodeMessage(frame) {
 }
 
 module.exports = {
+  DeviceType,
   decodeMessage,
   encodeArmedPartitionsReallyCommand,
   encodeArmedPartitionsSuppressedCommand,
@@ -967,6 +1127,7 @@ module.exports = {
   encodeZonesUnbypassCommand,
   encodeZonesViolationCommand,
   encodeZonesViolation256Command,
+  encodeReadDeviceName,
   ArmedPartitionsReallyAnswer,
   ArmedPartitionsSuppressedAnswer,
   CommandResultAnswer,
@@ -996,4 +1157,5 @@ module.exports = {
   ZonesTamperAlarmMemoryAnswer,
   ZonesTamperAnswer,
   ZonesViolationAnswer,
+  ReadDeviceNameAnswer,
 };

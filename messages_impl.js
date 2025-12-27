@@ -47,6 +47,7 @@ const Commands = Object.freeze({
   ForceArmInMode1: 0xa1,
   ForceArmInMode2: 0xa2,
   ForceArmInMode3: 0xa3,
+  ReadDeviceName: 0xee,
   CommandResult: 0xef,
 });
 
